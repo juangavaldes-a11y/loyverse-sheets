@@ -58,9 +58,19 @@ export function createApp(
       const state = typeof request.query.state === "string" ? request.query.state : "";
       if (!code || !state) throw new Error("Missing OAuth code or state");
       await auth.exchangeCode(code, state);
-      if (config.PUBLIC_BASE_URL.startsWith("https://")) await registerWebhooks();
+      let webhookWarning = false;
+      if (config.PUBLIC_BASE_URL.startsWith("https://")) {
+        try {
+          await registerWebhooks();
+        } catch (error) {
+          webhookWarning = true;
+          appLogger.error({ err: error }, "Loyverse connected but webhook registration failed");
+        }
+      }
       void runSync();
-      response.type("text").send("Loyverse connected. The first Google Sheets backup has started.");
+      response.type("text").send(webhookWarning
+        ? "Loyverse connected and the first backup started. Webhook setup failed, so polling remains active."
+        : "Loyverse connected. The first Google Sheets backup has started.");
     } catch (error) {
       next(error);
     }

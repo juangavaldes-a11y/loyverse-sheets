@@ -73,3 +73,13 @@ test("ensureWebhook skips enabled hooks and creates missing hooks", async () => 
   assert.equal(requests.length, 3);
   assert.match(requests[2]!.body!, /receipts.update/);
 });
+
+test("ensureWebhook accepts wrapped live API responses and rejects unknown shapes", async () => {
+  const wrapped = new LoyverseClient(auth, async () => jsonResponse({
+    webhooks: [{ url: "https://hook", type: "items.update", status: "ENABLED" }],
+  }));
+  await wrapped.ensureWebhook("https://hook", "items.update");
+
+  const malformed = new LoyverseClient(auth, async () => jsonResponse({ data: [] }));
+  await assert.rejects(malformed.ensureWebhook("https://hook", "items.update"), /unexpected response/);
+});

@@ -67,6 +67,12 @@ export interface Receipt {
   line_items: ReceiptLine[];
 }
 
+interface Webhook {
+  url: string;
+  type: string;
+  status: string;
+}
+
 export class LoyverseClient {
   constructor(
     private readonly auth: LoyverseAuth,
@@ -114,7 +120,13 @@ export class LoyverseClient {
   }
 
   async ensureWebhook(url: string, type: string): Promise<void> {
-    const existing = await this.request<Array<{ url: string; type: string; status: string }>>("/webhooks/");
+    const response = await this.request<unknown>("/webhooks/");
+    const existing = Array.isArray(response)
+      ? response as Webhook[]
+      : typeof response === "object" && response !== null && Array.isArray((response as { webhooks?: unknown }).webhooks)
+        ? (response as { webhooks: Webhook[] }).webhooks
+        : undefined;
+    if (!existing) throw new Error("Loyverse webhook list returned an unexpected response");
     if (existing.some((hook) => hook.url === url && hook.type === type && hook.status === "ENABLED")) return;
     await this.request("/webhooks/", {
       method: "POST",

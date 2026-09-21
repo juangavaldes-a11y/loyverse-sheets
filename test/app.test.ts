@@ -8,7 +8,7 @@ import type { LoyverseClient } from "../src/loyverse.js";
 import type { BackupService } from "../src/sync.js";
 import { oauthConfig } from "./helpers.js";
 
-function makeApp(overrides: { mode?: "personal" | "oauth"; exchangeError?: Error } = {}) {
+function makeApp(overrides: { mode?: "personal" | "oauth"; exchangeError?: Error; hookError?: Error } = {}) {
   let syncCount = 0;
   const hooks: string[] = [];
   const errors: unknown[] = [];
@@ -16,7 +16,10 @@ function makeApp(overrides: { mode?: "personal" | "oauth"; exchangeError?: Error
     createAuthorizationUrl: () => "https://api.loyverse.com/oauth/authorize?state=test",
     exchangeCode: async () => { if (overrides.exchangeError) throw overrides.exchangeError; },
   } as unknown as LoyverseAuth;
-  const loyverse = { ensureWebhook: async (_url: string, type: string) => { hooks.push(type); } } as unknown as LoyverseClient;
+  const loyverse = { ensureWebhook: async (_url: string, type: string) => {
+    if (overrides.hookError) throw overrides.hookError;
+    hooks.push(type);
+  } } as unknown as LoyverseClient;
   const backup = { syncAll: async () => { syncCount += 1; return { items: 1, variants: 1, inventory: 1, salesLines: 1 }; } } as BackupService;
   const config = overrides.mode === "personal"
     ? { ...oauthConfig, LOYVERSE_AUTH_MODE: "personal" as const, LOYVERSE_ACCESS_TOKEN: "token" }
@@ -58,6 +61,16 @@ test("OAuth callback does not register webhooks on a local HTTP URL", async () =
     { syncAll: async () => ({ items: 0, variants: 0, inventory: 0, salesLines: 0 }) } as BackupService);
   await request(local.app).get("/auth/loyverse/callback?code=code&state=state").expect(200);
   assert.equal(integration.hooks.length, 0);
+});
+
+test("OAuth remains connected and starts polling when webhook setup fails", async () => {
+  const hookError = new Error("webhook unavailable");
+  const integration = makeApp({ hookError });
+  const response = await request(integration.app).get("/auth/loyverse/callback?code=code&state=state").expect(200);
+  await settle();
+  assert.match(response.text, /polling remains active/);
+  assert.equal(integration.getSyncCount(), 1);
+  assert.deepEqual(integration.errors[0], { err: hookError });
 });
 
 test("webhook requires OAuth signature and a valid supported payload", async () => {
