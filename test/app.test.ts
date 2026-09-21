@@ -11,6 +11,7 @@ import { oauthConfig } from "./helpers.js";
 function makeApp(overrides: { mode?: "personal" | "oauth"; exchangeError?: Error } = {}) {
   let syncCount = 0;
   const hooks: string[] = [];
+  const errors: unknown[] = [];
   const auth = {
     createAuthorizationUrl: () => "https://api.loyverse.com/oauth/authorize?state=test",
     exchangeCode: async () => { if (overrides.exchangeError) throw overrides.exchangeError; },
@@ -20,8 +21,12 @@ function makeApp(overrides: { mode?: "personal" | "oauth"; exchangeError?: Error
   const config = overrides.mode === "personal"
     ? { ...oauthConfig, LOYVERSE_AUTH_MODE: "personal" as const, LOYVERSE_ACCESS_TOKEN: "token" }
     : oauthConfig;
-  const result = createApp(config, auth, loyverse, backup);
-  return { ...result, hooks, getSyncCount: () => syncCount };
+  const appLogger = {
+    info: () => undefined,
+    error: (bindings: unknown) => { errors.push(bindings); },
+  } as unknown as Parameters<typeof createApp>[4];
+  const result = createApp(config, auth, loyverse, backup, appLogger);
+  return { ...result, hooks, errors, getSyncCount: () => syncCount };
 }
 
 const payload = Buffer.from(JSON.stringify({ merchant_id: "merchant", type: "items.update", created_at: "2026-01-01T00:00:00Z" }));
@@ -91,4 +96,13 @@ test("personal mode rejects webhook registration and errors remain private", asy
   const failed = makeApp({ exchangeError: new Error("secret internal detail") });
   const response = await request(failed.app).get("/auth/loyverse/callback?code=code&state=state").expect(500);
   assert.doesNotMatch(response.text, /secret internal detail/);
+});
+
+test("request failures log Error objects under Pino's err field", async () => {
+  const failure = new Error("diagnostic detail");
+  const integration = makeApp({ exchangeError: failure });
+  await request(integration.app).get("/auth/loyverse/callback?code=code&state=state").expect(500);
+  assert.equal(integration.errors.length, 1);
+  assert.deepEqual(integration.errors[0], { err: failure });
+  assert.equal("error" in (integration.errors[0] as object), false);
 });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
-import pino from "pino";
+import pino, { type Logger } from "pino";
 import type { Config } from "./config.js";
 import type { LoyverseAuth } from "./auth.js";
 import type { LoyverseClient } from "./loyverse.js";
@@ -10,7 +10,13 @@ import { validLoyverseSignature, validWebhookPayload } from "./webhook.js";
 
 const logger = pino();
 
-export function createApp(config: Config, auth: LoyverseAuth, loyverse: LoyverseClient, backup: BackupService) {
+export function createApp(
+  config: Config,
+  auth: LoyverseAuth,
+  loyverse: LoyverseClient,
+  backup: BackupService,
+  appLogger: Pick<Logger, "info" | "error"> = logger,
+) {
   const app = express();
   let syncRunning = false;
 
@@ -18,9 +24,9 @@ export function createApp(config: Config, auth: LoyverseAuth, loyverse: Loyverse
     if (syncRunning) return;
     syncRunning = true;
     try {
-      logger.info({ result: await backup.syncAll() }, "Loyverse backup completed");
+      appLogger.info({ result: await backup.syncAll() }, "Loyverse backup completed");
     } catch (error) {
-      logger.error({ error }, "Loyverse backup failed");
+      appLogger.error({ err: error }, "Loyverse backup failed");
     } finally {
       syncRunning = false;
     }
@@ -38,7 +44,7 @@ export function createApp(config: Config, auth: LoyverseAuth, loyverse: Loyverse
     const requestId = randomUUID();
     const startedAt = Date.now();
     response.on("finish", () => {
-      logger.info({ requestId, method: request.method, path: request.path, status: response.statusCode,
+      appLogger.info({ requestId, method: request.method, path: request.path, status: response.statusCode,
         durationMs: Date.now() - startedAt }, "HTTP request");
     });
     next();
@@ -91,7 +97,7 @@ export function createApp(config: Config, auth: LoyverseAuth, loyverse: Loyverse
     }
   });
   app.use((error: Error, _request: Request, response: Response, _next: NextFunction) => {
-    logger.error({ error }, "Request failed");
+    appLogger.error({ err: error }, "Request failed");
     response.status(500).json({ error: "Internal server error" });
   });
 
